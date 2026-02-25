@@ -59,6 +59,9 @@ class Clause:
 	def __iter__(self):
 		return iter(self.literals)
 
+	def __eq__(self, other):
+		return self.literals == other.literals
+
 class ImplicationGraph:
 	"""
 	An implication graph.
@@ -226,7 +229,7 @@ class Core:
 					return False
 			self.in_conflict = True
 			self.graph.add_conflict(clause.literals)
-			self.state.conflict = self.graph.conflict_clause
+			self.state.conflict = Clause(self.graph.conflict_clause)
 			return True
 		return False
 
@@ -260,6 +263,14 @@ class Core:
 			self.state.unsat = True
 			return True
 		return False
+
+	#def learn(self) -> bool:
+	#	if self.state.conflict is not None and self.state.conflict not in self.state.clauses:
+	#		self.state.clauses.append(self.state.conflict)
+	#		return True
+	#	return False
+
+	# TODO: store a map T[n] = {clause indices} such that if C = clause[k], k in T[n], then C has n literals x s.t. x, ~x are both unassigned
 
 	def __repr__(self) -> str:
 		core_string = 'State:\n' + repr(self.state)
