@@ -1,32 +1,49 @@
-from core import *
+"""Run the solver on one DIMACS CNF file."""
 
-if __name__ == '__main__':
-	state = State([
-		Clause.make("1"),
-		Clause.make("-1", "2"),
-		Clause.make("-3", "4"),
-		Clause.make("-5", "-6"),
-		Clause.make("-1", "-5", "7"),
-		Clause.make("-2", "-5", "6", "-7")
-	])
+from __future__ import annotations
 
-	core = Core(state)
+import argparse
+from solver import solve_dimacs
 
-	core.propagate(0)
-	core.propagate(1)
 
-	core.decide(BoolLiteral.make_pos("3"))
-	core.propagate(2)
+def main() -> None:
+    ap = argparse.ArgumentParser(description="CDCL SAT solver")
+    ap.add_argument("cnf", help="Path to a DIMACS CNF file")
+    ap.add_argument("--heuristic", choices=["baseline", "vsids"], default="baseline")
+    ap.add_argument("--timeout", type=float, default=10.0)
+    ap.add_argument("--seed", type=int, default=0)
 
-	core.decide(BoolLiteral.make_pos("5"))
-	core.propagate(3)
-	core.propagate(4)
+    ap.add_argument("--vsids-bump", type=float, default=1.0)
+    ap.add_argument("--vsids-decay", type=float, default=0.95)
+    ap.add_argument("--vsids-decay-period", type=int, default=50)
 
-	core.conflict(5)
-	print(core)
+    ap.add_argument("--debug", action="store_true")
+    args = ap.parse_args()
 
-	core.explain()
-	print(core)
+    result = solve_dimacs(
+        args.cnf,
+        heuristic_name=args.heuristic,
+        timeout_sec=args.timeout,
+        seed=args.seed,
+        vsids_bump=args.vsids_bump,
+        vsids_decay_factor=args.vsids_decay,
+        vsids_decay_period=args.vsids_decay_period,
+        debug=args.debug,
+    )
 
-	core.backjump(0)
-	print(core)
+    print("\n=== RESULT ===")
+    print("Status:", result.status)
+    print("Runtime (sec):", round(result.runtime_sec, 6))
+    print("Decisions:", result.stats.decisions)
+    print("Conflicts:", result.stats.conflicts)
+    print("Learned clauses:", result.stats.learned_clauses)
+    print("Propagations:", result.stats.propagations)
+
+    if result.status == "SAT":
+        print("Assignment:")
+        for v, val in sorted(result.assignment.items()):
+            print(f"  {v} = {val}")
+
+
+if __name__ == "__main__":
+    main()

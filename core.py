@@ -1,294 +1,347 @@
-from typing import *
-from copy import *
+# Makes type hints behave as forward references, allowing us to use the class name in type hints before the class is defined.
+from __future__ import annotations
+# Lets us clone graphs without worrying about shared references.
+from copy import deepcopy
+# Type hints for better readability and error checking.
+from typing import Dict, List, Optional, Set
 
 class BoolLiteral:
-	"""
-	A boolean literal for `variable`. If `polarity` == True then the literal is
-	positive, and if `polarity` == False then the literal is negative.
-	"""
-	def __init__(self, variable: str, polarity: bool):
-		self.variable = variable
-		self.polarity = polarity
+    """
+    A boolean literal for `variable`. 
+    polarity:
+    * True  means the literal is positive (x)
+    * False means the literal is negative (¬x)
+    """
+    def __init__(self, variable: str, polarity: bool):
+        self.variable = variable
+        self.polarity = polarity
 
-	def __repr__(self) -> str:
-		prefix = ""
-		if not self.polarity:
-			prefix = "¬"
-		return prefix + self.variable
+    def __repr__(self) -> str:
+        prefix = ""
+        if not self.polarity:
+            prefix = "¬"
+        return prefix + self.variable
 
-	def __eq__(self, other) -> bool:
-		if not isinstance(other, BoolLiteral):
-			return False
-		return self.variable == other.variable and self.polarity == other.polarity
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, BoolLiteral):
+            return False
+        return self.variable == other.variable and self.polarity == other.polarity
 
-	def __hash__(self):
-		return hash((self.variable, self.polarity))
+    def __hash__(self):
+        return hash((self.variable, self.polarity))
 
-	def is_pos(self, variable: str) -> bool:
-		return self.variable == variable and self.polarity is True
+    def is_pos(self, variable: str) -> bool:
+        return self.variable == variable and self.polarity is True
 
-	def is_neg(self, variable: str) -> bool:
-		return self.variable == variable and self.polarity is False
+    def is_neg(self, variable: str) -> bool:
+        return self.variable == variable and self.polarity is False
 
-	@staticmethod
-	def make_pos(variable: str):
-		return BoolLiteral(variable, True)
+    @staticmethod
+    def make_pos(variable: str):
+        return BoolLiteral(variable, True)
 
-	@staticmethod
-	def make_neg(variable: str):
-		return BoolLiteral(variable, False)
+    @staticmethod
+    def make_neg(variable: str):
+        return BoolLiteral(variable, False)
 
-	def negate(self):
-		return BoolLiteral(self.variable, not self.polarity)
+    def negate(self):
+        return BoolLiteral(self.variable, not self.polarity)
 
 
 class Clause:
-	"""
-	A CNF clause.
-	"""
-	def __init__(self, *literals: BoolLiteral):
-		self.literals = set(literals)
+    """
+    A CNF clause (an OR of literals).
+    """
+    def __init__(self, *literals: BoolLiteral):
+        # Store as a set: duplicates disappear automatically.
+        self.literals: Set[BoolLiteral] = set(literals)
 
-	def __repr__(self) -> str:
-		return self.literals.__repr__()
+    def __repr__(self) -> str:
+        return self.literals.__repr__()
+    
+    def __iter__(self):
+        return iter(self.literals)
+    
+    def __eq__(self, other) -> bool:
+        # Two clauses are equal if they have the same set of literals
+        return isinstance(other, Clause) and self.literals == other.literals
 
-	@staticmethod
-	def make(*lit_strings: str):
-		literals = []
-		for lit_string in lit_strings:
-			if lit_string[0] == '-':
-				literals.append(BoolLiteral.make_neg(lit_string[1:]))
-			else:
-				literals.append(BoolLiteral.make_pos(lit_string))
-		return Clause(*literals)
+    def __hash__(self) -> int:
+        # Needed so Clause can be compared and stored in sets
+        return hash(frozenset(self.literals))
 
-	def __iter__(self):
-		return iter(self.literals)
+    @staticmethod
+    def make(*lit_strings: str) -> "Clause":
+        """Convenience for small tests: Clause.make("1","-2","3")"""
+        literals: List[BoolLiteral] = []
+        for lit_string in lit_strings:
+            if lit_string.startswith("-"):
+                literals.append(BoolLiteral.make_neg(lit_string[1:]))
+            else:
+                literals.append(BoolLiteral.make_pos(lit_string))
+        return Clause(*literals)
 
 class ImplicationGraph:
-	"""
-	An implication graph.
-	"""
-	def __init__(self, edges=None, conflict_clause=None):
-		self.edges: Dict[BoolLiteral, Set[BoolLiteral]] = edges if edges is not None else {}
-		self.conflict_clause: Optional[Set[BoolLiteral]] = conflict_clause
+    """Implication graph used during conflict analysis.
 
-	def add_node(self, node: BoolLiteral):
-		if node not in self.edges:
-			self.edges[node] = set()
+    Stored as: child -> set(parents)
+    because explain() needs parents quickly.
+    """
+    def __init__(
+        self,
+        edges: Optional[Dict[BoolLiteral, Set[BoolLiteral]]] = None,
+        conflict_clause: Optional[Set[BoolLiteral]] = None,
+    ):
+        self.edges: Dict[BoolLiteral, Set[BoolLiteral]] = edges if edges is not None else {}
+        self.conflict_clause: Optional[Set[BoolLiteral]] = conflict_clause
 
-	def add_edge(self, src: BoolLiteral, tgt: BoolLiteral):
-		if tgt not in self.edges:
-			self.edges[tgt] = set()
-		self.edges[tgt].add(src)
+    def add_node(self, node: BoolLiteral) -> None:
+        self.edges.setdefault(node, set())
 
-	def add_conflict(self, srcs: set[BoolLiteral]):
-		self.conflict_clause = set(srcs)
+    def add_edge(self, src: BoolLiteral, tgt: BoolLiteral) -> None:
+        self.edges.setdefault(tgt, set()).add(src)
 
-	def explain(self, node: BoolLiteral):
-		if self.conflict_clause is None:
-			return
-		self.conflict_clause.discard(node.negate())
-		for parent in self.edges.get(node, []):
-			self.conflict_clause.add(parent.negate())
+    def add_conflict(self, srcs: Set[BoolLiteral]) -> None:
+        self.conflict_clause = set(srcs)
 
-	def __repr__(self) -> str:
-		string = ""
-		for tgt in self.edges:
-			for src in self.edges[tgt]:
-				string += repr(src) + ' -> ' + repr(tgt) + '\n'
-		return string
+    def explain(self, node: BoolLiteral) -> None:
+        """One resolution-like step.
 
-	def __deepcopy__(self, memo):
-		return ImplicationGraph(deepcopy(self.edges), deepcopy(self.conflict_clause))
+        - remove ¬node from conflict clause
+        - add negations of node's parents
+        """
+        if self.conflict_clause is None:
+            return
+
+        self.conflict_clause.discard(node.negate())
+        for parent in self.edges.get(node, set()):
+            self.conflict_clause.add(parent.negate())
+
+    def __repr__(self) -> str:
+        out = []
+        for tgt, srcs in self.edges.items():
+            for src in srcs:
+                out.append(f"{src!r} -> {tgt!r}")
+        return "\n".join(out) + ("\n" if out else "")
+
+    def __deepcopy__(self, memo):
+        return ImplicationGraph(deepcopy(self.edges), deepcopy(self.conflict_clause))
 
 
 class Model:
-	"""
-	A variable assignment.
-	"""
-	def __init__(self):
-		self.assignment: List[BoolLiteral] = []
-		self.decision_level = 0
-		self.decisions: List[int] = []
-		self.decision_levels: Dict[BoolLiteral, int] = {}
+    """
+    A variable assignment.
+    """
+    def __init__(self):
+        self.assignment: List[BoolLiteral] = []
+        self.decision_level: int = 0
+        # decisions stores the assignment index where each decision level starts
+        self.decisions: List[int] = []
+        self.decision_levels: Dict[BoolLiteral, int] = {}
 
-	def __contains__(self, literal: BoolLiteral) -> bool:
-		return literal in self.assignment
+    def __contains__(self, literal: BoolLiteral) -> bool:
+        return literal in self.assignment
 
-	def assign(self, literal: BoolLiteral):
-		self.assignment.append(literal)
-		self.decision_levels[literal] = self.decision_level
+    def assign(self, literal: BoolLiteral) -> None:
+        # assign = forced (propagation)
+        self.assignment.append(literal)
+        self.decision_levels[literal] = self.decision_level
 
-	def decide(self, literal: BoolLiteral):
-		self.decisions.append(len(self.assignment))
-		self.assignment.append(literal)
-		self.decision_level += 1
-		self.decision_levels[literal] = self.decision_level
+    def decide(self, literal: BoolLiteral) -> None:
+        # decide = guess at a new decision level
+        self.decisions.append(len(self.assignment))
+        self.assignment.append(literal)
+        self.decision_level += 1
+        self.decision_levels[literal] = self.decision_level
 
-	def backjump(self, decision_level: int):
-		idx = self.decisions[decision_level]
-		removed = self.assignment[idx:]
-		self.assignment = self.assignment[:idx]
-		self.decisions = self.decisions[:decision_level]
-		self.decision_level = decision_level
+    def backjump(self, decision_level: int) -> None:
+        idx = self.decisions[decision_level]
+        removed = self.assignment[idx:]
 
-		# Remove stale decision level mappings
-		for lit in removed:
-			if lit in self.decision_levels:
-				del self.decision_levels[lit]
+        self.assignment = self.assignment[:idx]
+        self.decisions = self.decisions[:decision_level]
+        self.decision_level = decision_level
 
-	def get_current_decision_literals(self) -> List[BoolLiteral]:
-		if not self.decisions:
-			return self.assignment
-		return self.assignment[self.decisions[-1]:]
+        # Remove stale decision level mappings
+        for lit in removed:
+            self.decision_levels.pop(lit, None)
 
-	def get_last_literal(self) -> BoolLiteral:
-		return self.assignment[-1]
+    def get_current_decision_literals(self) -> List[BoolLiteral]:
+        if not self.decisions:
+            return self.assignment
+        return self.assignment[self.decisions[-1]:]
 
-	def get_level(self, literal: BoolLiteral) -> int:
-		return self.decision_levels.get(literal, -1)
+    def get_last_literal(self) -> BoolLiteral:
+        return self.assignment[-1]
 
-	def __repr__(self) -> str:
-		model_string = ''
-		if self.decision_level == 0:
-			for literal in self.assignment:
-				model_string += repr(literal) + ' '
-			return model_string
+    # correctly checks both literal and its negation
+    def get_level(self, literal: BoolLiteral) -> int:
+        """IMPORTANT: learned clauses can contain ¬x even if the model stores x.
 
-		last_level = 0
-		for level in self.decisions:
-			for literal in self.assignment[last_level:level]:
-				model_string += repr(literal) + ' '
-			model_string += '• '
-			last_level = level
+        So if literal isn't found, we also try its negation.
+        """
+        lvl = self.decision_levels.get(literal, None)
+        if lvl is not None:
+            return lvl
+        return self.decision_levels.get(literal.negate(), -1)
 
-		for literal in self.assignment[self.decisions[-1]:]:
-			model_string += repr(literal) + ' '
-		return model_string
+    def __repr__(self) -> str:
+        if self.decision_level == 0:
+            return " ".join(repr(l) for l in self.assignment)
 
-	def __iter__(self):
-		return iter(self.assignment)
+        out: List[str] = []
+        last = 0
+        for idx in self.decisions:
+            out.extend(repr(l) for l in self.assignment[last:idx])
+            out.append("•")
+            last = idx
+        out.extend(repr(l) for l in self.assignment[last:])
+        return " ".join(out)
+
+    def __iter__(self):
+        return iter(self.assignment)
 
 
 class State:
-	"""
-	State for the CDCL proof system.
-	"""
-	def __init__(self, clauses: List[Clause]):
-		self.clauses = clauses
-		self.model = Model()
-		self.conflict = None
-		self.unsat = False
-		self.sat = False
+    """
+    State for the CDCL proof system.
+    """
+    def __init__(self, clauses: List[Clause]):
+        self.clauses = clauses
+        self.model = Model()
+        self.conflict = None
+        self.unsat = False
+        self.sat = False
 
-	def __repr__(self) -> str:
-		if self.unsat:
-			return "UNSAT"
-		if self.sat:
-			return "SAT"
-		state_string = 'Δ = ' + repr(self.clauses) + '\n'
-		state_string += 'M = ' + repr(self.model) + '\n'
-		state_string += 'C = '
-		state_string += repr(self.conflict) + '\n' if self.conflict else 'no\n'
-		return state_string
+    def __repr__(self) -> str:
+        if self.unsat:
+            return "UNSAT"
+        if self.sat:
+            return "SAT"
+        
+        out = []
+        out.append("Δ = " + repr(self.clauses))
+        out.append("M = " + repr(self.model))
+        out.append("C = " + (repr(self.conflict) if self.conflict else "no"))
+        return "\n".join(out) + "\n"
 
 
 class Core:
-	""" 
-	Maintains state for CDCL core.
-	"""
-	def __init__(self, state: State):
-		self.graphs = [ImplicationGraph()]
-		self.graph = self.graphs[-1]
-		self.in_conflict = False
-		self.state = state
+    """ 
+    Implements the core CDCL-style rules on the current State.
+    """
+    def __init__(self, state: State):
+        self.graphs: List[ImplicationGraph] = [ImplicationGraph()]
+        self.graph: ImplicationGraph = self.graphs[-1]
+        self.in_conflict: bool = False
+        self.state = state
 
-	def propagate(self, clause_idx: int) -> bool:
-		clause = self.state.clauses[clause_idx]
-		unassigned_lit = None
-		num_unassigned = 0
+    def propagate(self, clause_idx: int) -> bool:
+        """Unit propagation using clause_idx.
+        Returns True if it made a new assignment.
+        """
+        clause = self.state.clauses[clause_idx]
+        unassigned_lit: Optional[BoolLiteral] = None
+        num_unassigned = 0
 
-		for literal in clause:
-			if literal.negate() not in self.state.model:
-				num_unassigned += 1
-				unassigned_lit = literal
+        for literal in clause:
+            if literal.negate() not in self.state.model:
+                num_unassigned += 1
+                unassigned_lit = literal
 
-		if num_unassigned == 1 and \
-		   unassigned_lit not in self.state.model and \
-		   unassigned_lit.negate() not in self.state.model:
+        if num_unassigned == 1 and \
+           unassigned_lit not in self.state.model and \
+           unassigned_lit.negate() not in self.state.model:
 
-			self.state.model.assign(unassigned_lit)
-			self.graph.add_node(unassigned_lit)
+            self.state.model.assign(unassigned_lit)
+            self.graph.add_node(unassigned_lit)
 
-			for literal in clause.literals - {unassigned_lit}:
-				self.graph.add_edge(literal.negate(), unassigned_lit)
+            for literal in clause.literals - {unassigned_lit}:
+                self.graph.add_edge(literal.negate(), unassigned_lit)
 
-			return True
-		return False
+            return True
+        return False
 
-	def decide(self, literal: BoolLiteral) -> bool:
-		if literal not in self.state.model and literal.negate() not in self.state.model:
-			self.state.model.decide(literal)
-			self.graphs.append(deepcopy(self.graph))
-			self.graph = self.graphs[-1]
-			return True
-		return False
+    def decide(self, literal: BoolLiteral) -> bool:
+        """Make a decision assignment at a new decision level."""
+        if literal not in self.state.model and literal.negate() not in self.state.model:
+            self.state.model.decide(literal)
+            self.graphs.append(deepcopy(self.graph))
+            self.graph = self.graphs[-1]
+            return True
+        return False
 
-	def conflict(self, clause_idx: int) -> bool:
-		if not self.in_conflict:
-			clause = self.state.clauses[clause_idx]
-			for literal in clause:
-				if literal.negate() not in self.state.model:
-					return False
-			self.in_conflict = True
-			self.graph.add_conflict(clause.literals)
-			self.state.conflict = Clause(self.graph.conflict_clause)
-			return True
-		return False
+    def conflict(self, clause_idx: int) -> bool:
+        """Detect a conflicting clause (all literals are false)."""
+        if not self.in_conflict:
+            clause = self.state.clauses[clause_idx]
+            for literal in clause:
+                if literal.negate() not in self.state.model:
+                    return False
+            self.in_conflict = True
+            self.graph.add_conflict(clause.literals)
+            # Clause(*set) unpacks the set into individual literals.
+            # Without this fix, conflict analysis would crash or behave incorrectly.
+            self.state.conflict = Clause(*self.graph.conflict_clause)
+            return True
+        return False
 
-	def explain(self) -> bool:
-		decision_literals = self.state.model.get_current_decision_literals()
-		while len(decision_literals) > 1:
-			last_literal = self.state.model.assignment.pop(-1)
-			self.graph.explain(last_literal)
-			decision_literals = decision_literals[:-1]
-		return True
+    def explain(self) -> bool:
+        """Explain conflict until only 1 literal remains at current decision level."""
+        decision_literals = self.state.model.get_current_decision_literals()
+        while len(decision_literals) > 1:
+            last_literal = self.state.model.assignment.pop(-1)
+            self.graph.explain(last_literal)
+            decision_literals = decision_literals[:-1]
+        return True
 
-	def backjump(self, decision_level: int) -> bool:
-		if self.in_conflict:
-			conflict_clause = self.graph.conflict_clause
-			decision_literal = self.state.model.get_last_literal()
-			level = -1
+    def backjump(self, decision_level: int) -> bool:
+        """Backjump to decision_level and assert the learned clause."""
+        if not self.in_conflict or self.graph.conflict_clause is None:
+            return False
 
-			for literal in conflict_clause - {decision_literal}:
-				level = max(level, self.state.model.get_level(literal))
+        conflict_clause = self.graph.conflict_clause
+        decision_literal = self.state.model.get_last_literal()
+        uip_neg = decision_literal.negate()
 
-			if decision_level >= level:
-				self.in_conflict = False
-				self.state.model.backjump(decision_level)
-				self.state.model.assign(decision_literal.negate())
-				self.state.conflict = None
-				self.graphs = self.graphs[:decision_level + 1]
-				self.graph = self.graphs[-1]
-				return True
-		return False
+        # IMPORTANT: conflict_clause contains uip_neg (not decision_literal)
+        level = -1
+        for literal in conflict_clause - {uip_neg}:
+            level = max(level, self.state.model.get_level(literal))
 
-	def fail(self) -> bool:
-		if self.state.model.decision_level == 0 and self.in_conflict:
-			self.state.unsat = True
-			return True
-		return False
+        if decision_level >= level:
+            self.in_conflict = False
+            self.state.model.backjump(decision_level)
 
-	#def learn(self) -> bool:
-	#	if self.state.conflict is not None and self.state.conflict not in self.state.clauses:
-	#		self.state.clauses.append(self.state.conflict)
-	#		return True
-	#	return False
+            # Assert the negation of the remaining literal.
+            self.state.model.assign(decision_literal.negate())
 
-	# TODO: store a map T[n] = {clause indices} such that if C = clause[k], k in T[n], then C has n literals x s.t. x, ~x are both unassigned
+            self.state.conflict = None
+            self.graphs = self.graphs[: decision_level + 1]
+            self.graph = self.graphs[-1]
+            return True
+        return False
 
-	def __repr__(self) -> str:
-		core_string = 'State:\n' + repr(self.state)
-		core_string += 'Implication Graph:\n' + repr(self.graph)
-		return core_string
+    def fail(self) -> bool:
+        """UNSAT if we are in conflict at decision level 0."""
+        if self.state.model.decision_level == 0 and self.in_conflict:
+            self.state.unsat = True
+            return True
+        return False
+
+    def learn(self) -> Optional[Clause]:
+        """Add the current conflict clause to the clause database (if new)."""
+        if self.graph.conflict_clause is None:
+            return None
+
+        learned = Clause(*self.graph.conflict_clause)
+        if learned not in self.state.clauses:
+            self.state.clauses.append(learned)
+        return learned
+
+    # TODO: store a map T[n] = {clause indices} such that if C = clause[k], k in T[n], then C has n literals x s.t. x, ~x are both unassigned
+
+    def __repr__(self) -> str:
+        core_string = 'State:\n' + repr(self.state)
+        core_string += 'Implication Graph:\n' + repr(self.graph)
+        return core_string
