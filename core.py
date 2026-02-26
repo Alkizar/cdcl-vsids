@@ -4,7 +4,7 @@ from copy import *
 class BoolLiteral:
 	"""
 	A boolean literal for `variable`. If `polarity` == True then the literal is
-	positive, and if `poliary` == False then the literal is negative.
+	positive, and if `polarity` == False then the literal is negative.
 	"""
 	def __init__(self, variable: str, polarity: bool):
 		self.variable = variable
@@ -16,26 +16,31 @@ class BoolLiteral:
 			prefix = "¬"
 		return prefix + self.variable
 
-	def __eq__(self, other: BoolLiteral) -> bool:
+	def __eq__(self, other) -> bool:
+		if not isinstance(other, BoolLiteral):
+			return False
 		return self.variable == other.variable and self.polarity == other.polarity
-
-	def is_pos(self, variable: str) -> bool:
-		return self.variable == variable and self.polarity == True
-
-	def is_neg(self, variable: str) -> bool:
-		return self.variable == variable and self.polarity == False
-
-	def make_pos(variable: str) -> BoolLiteral:
-		return BoolLiteral(variable, True)
-
-	def make_neg(variable: str) -> BoolLiteral:
-		return BoolLiteral(variable, False)
-
-	def negate(self) -> BoolLiteral:
-		return BoolLiteral(self.variable, not self.polarity)
 
 	def __hash__(self):
 		return hash((self.variable, self.polarity))
+
+	def is_pos(self, variable: str) -> bool:
+		return self.variable == variable and self.polarity is True
+
+	def is_neg(self, variable: str) -> bool:
+		return self.variable == variable and self.polarity is False
+
+	@staticmethod
+	def make_pos(variable: str):
+		return BoolLiteral(variable, True)
+
+	@staticmethod
+	def make_neg(variable: str):
+		return BoolLiteral(variable, False)
+
+	def negate(self):
+		return BoolLiteral(self.variable, not self.polarity)
+
 
 class Clause:
 	"""
@@ -47,7 +52,8 @@ class Clause:
 	def __repr__(self) -> str:
 		return self.literals.__repr__()
 
-	def make(*lit_strings: str) -> Clause:
+	@staticmethod
+	def make(*lit_strings: str):
 		literals = []
 		for lit_string in lit_strings:
 			if lit_string[0] == '-':
@@ -59,29 +65,31 @@ class Clause:
 	def __iter__(self):
 		return iter(self.literals)
 
-	def __eq__(self, other):
-		return self.literals == other.literals
-
 class ImplicationGraph:
 	"""
 	An implication graph.
 	"""
-	def __init__(self, edges: dict[BoolLiteral, set(BoolLiteral)]={}, conflict_clause: set(BoolLiteral)=None):
-		self.edges = edges
-		self.conflict_clause = conflict_clause
+	def __init__(self, edges=None, conflict_clause=None):
+		self.edges: Dict[BoolLiteral, Set[BoolLiteral]] = edges if edges is not None else {}
+		self.conflict_clause: Optional[Set[BoolLiteral]] = conflict_clause
 
 	def add_node(self, node: BoolLiteral):
-		self.edges[node] = set()
+		if node not in self.edges:
+			self.edges[node] = set()
 
 	def add_edge(self, src: BoolLiteral, tgt: BoolLiteral):
+		if tgt not in self.edges:
+			self.edges[tgt] = set()
 		self.edges[tgt].add(src)
 
-	def add_conflict(self, srcs: set(BoolLiteral)):
-		self.conflict_clause = srcs
+	def add_conflict(self, srcs: set[BoolLiteral]):
+		self.conflict_clause = set(srcs)
 
 	def explain(self, node: BoolLiteral):
+		if self.conflict_clause is None:
+			return
 		self.conflict_clause.discard(node.negate())
-		for parent in self.edges[node]:
+		for parent in self.edges.get(node, []):
 			self.conflict_clause.add(parent.negate())
 
 	def __repr__(self) -> str:
@@ -91,18 +99,22 @@ class ImplicationGraph:
 				string += repr(src) + ' -> ' + repr(tgt) + '\n'
 		return string
 
-	def __deepcopy__(self) -> ImplicationGraph:
-		return ImplicationGraph(deepcopy(self.edges), copy(self.conflict_clause))
+	def __deepcopy__(self, memo):
+		return ImplicationGraph(deepcopy(self.edges), deepcopy(self.conflict_clause))
+
 
 class Model:
 	"""
 	A variable assignment.
 	"""
 	def __init__(self):
-		self.assignment = []
+		self.assignment: List[BoolLiteral] = []
 		self.decision_level = 0
-		self.decisions = []
-		self.decision_levels = {}
+		self.decisions: List[int] = []
+		self.decision_levels: Dict[BoolLiteral, int] = {}
+
+	def __contains__(self, literal: BoolLiteral) -> bool:
+		return literal in self.assignment
 
 	def assign(self, literal: BoolLiteral):
 		self.assignment.append(literal)
@@ -116,25 +128,26 @@ class Model:
 
 	def backjump(self, decision_level: int):
 		idx = self.decisions[decision_level]
+		removed = self.assignment[idx:]
 		self.assignment = self.assignment[:idx]
 		self.decisions = self.decisions[:decision_level]
 		self.decision_level = decision_level
-		# TODO -- do we want to delete the removed literals from decision level dict here?
 
-	def get_current_decision_literals(self) -> list[BoolLiteral]:
+		# Remove stale decision level mappings
+		for lit in removed:
+			if lit in self.decision_levels:
+				del self.decision_levels[lit]
+
+	def get_current_decision_literals(self) -> List[BoolLiteral]:
+		if not self.decisions:
+			return self.assignment
 		return self.assignment[self.decisions[-1]:]
 
 	def get_last_literal(self) -> BoolLiteral:
 		return self.assignment[-1]
 
-	def contains(self, literal: BoolLiteral) -> bool:
-		return literal in self.assignment
-
 	def get_level(self, literal: BoolLiteral) -> int:
-		level = self.decision_levels.get(literal)
-		if level is not None:
-			return level
-		return -1
+		return self.decision_levels.get(literal, -1)
 
 	def __repr__(self) -> str:
 		model_string = ''
@@ -142,25 +155,25 @@ class Model:
 			for literal in self.assignment:
 				model_string += repr(literal) + ' '
 			return model_string
+
 		last_level = 0
 		for level in self.decisions:
 			for literal in self.assignment[last_level:level]:
 				model_string += repr(literal) + ' '
 			model_string += '• '
 			last_level = level
+
 		for literal in self.assignment[self.decisions[-1]:]:
-				model_string += repr(literal) + ' '
+			model_string += repr(literal) + ' '
 		return model_string
 
 	def __iter__(self):
 		return iter(self.assignment)
 
+
 class State:
 	"""
-	State for the CDCL proof system, consisting of
-	- A collection of clauses
-	- A partial assignment to literals
-	- A conflict clause (None if no conflict)
+	State for the CDCL proof system.
 	"""
 	def __init__(self, clauses: List[Clause]):
 		self.clauses = clauses
@@ -177,16 +190,13 @@ class State:
 		state_string = 'Δ = ' + repr(self.clauses) + '\n'
 		state_string += 'M = ' + repr(self.model) + '\n'
 		state_string += 'C = '
-		if self.conflict is not None:
-			state_string += repr(self.conflict) + '\n'
-		else:
-			state_string += 'no\n'
+		state_string += repr(self.conflict) + '\n' if self.conflict else 'no\n'
 		return state_string
+
 
 class Core:
 	""" 
-	Maintains state for CDCL core. Query to access conflict graph, unassigned 
-	literals, conflict state, etc.
+	Maintains state for CDCL core.
 	"""
 	def __init__(self, state: State):
 		self.graphs = [ImplicationGraph()]
@@ -204,9 +214,13 @@ class Core:
 				num_unassigned += 1
 				unassigned_lit = literal
 
-		if num_unassigned == 1 and unassigned_lit not in self.state.model and unassigned_lit.negate() not in self.state.model:
+		if num_unassigned == 1 and \
+		   unassigned_lit not in self.state.model and \
+		   unassigned_lit.negate() not in self.state.model:
+
 			self.state.model.assign(unassigned_lit)
 			self.graph.add_node(unassigned_lit)
+
 			for literal in clause.literals - {unassigned_lit}:
 				self.graph.add_edge(literal.negate(), unassigned_lit)
 
@@ -216,7 +230,7 @@ class Core:
 	def decide(self, literal: BoolLiteral) -> bool:
 		if literal not in self.state.model and literal.negate() not in self.state.model:
 			self.state.model.decide(literal)
-			self.graphs.append(self.graph.__deepcopy__())
+			self.graphs.append(deepcopy(self.graph))
 			self.graph = self.graphs[-1]
 			return True
 		return False
@@ -246,8 +260,10 @@ class Core:
 			conflict_clause = self.graph.conflict_clause
 			decision_literal = self.state.model.get_last_literal()
 			level = -1
+
 			for literal in conflict_clause - {decision_literal}:
 				level = max(level, self.state.model.get_level(literal))
+
 			if decision_level >= level:
 				self.in_conflict = False
 				self.state.model.backjump(decision_level)
