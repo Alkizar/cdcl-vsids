@@ -155,7 +155,11 @@ class Model:
         self.decision_levels[literal] = self.decision_level
 
     def backjump(self, decision_level: int) -> None:
-        idx = self.decisions[decision_level]
+        if decision_level < len(self.decisions):
+            idx = self.decisions[decision_level]
+        else:
+            # Backjumping to the current decision level
+            idx = len(self.assignment)
         removed = self.assignment[idx:]
 
         self.assignment = self.assignment[:idx]

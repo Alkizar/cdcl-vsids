@@ -74,7 +74,7 @@ def _compute_backjump_level(core: Core) -> int:
 def solve_cnf(
     clauses: List[Clause],
     heuristic_name: str = "baseline",
-    timeout_sec: float = 10.0,
+    timeout_sec: float = 50.0,
     seed: int = 0,
     vsids_bump: float = 1.0,
     vsids_decay_factor: float = 0.95,
