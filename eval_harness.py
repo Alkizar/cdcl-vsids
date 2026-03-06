@@ -42,6 +42,7 @@ def run_benchmarks(
     seed: int = 0,
     run_baseline: bool = True,
     run_vsids: bool = True,
+    check_results: bool = False,
 ) -> None:
     heuristics: List[str] = []
     if run_baseline:
@@ -52,6 +53,7 @@ def run_benchmarks(
     rows: List[Dict[str, object]] = []
 
     for cnf_path in cnf_files:
+        results = {}
         for h in heuristics:
             result = solve_dimacs(
                 cnf_path,
@@ -59,6 +61,9 @@ def run_benchmarks(
                 timeout_sec=timeout_sec,
                 seed=seed,
             )
+
+            results[h] = result.status
+
             row = _result_to_row(cnf_path, h, result)
             rows.append(row)
 
@@ -66,6 +71,11 @@ def run_benchmarks(
                 f"[{h}] {os.path.basename(cnf_path)} -> {result.status} "
                 f"({row['runtime_sec']}s, decisions={row['decisions']}, conflicts={row['conflicts']})"
             )
+
+        # Emit warning if mismatched outputs are detected across heuristics
+        if check_results and "SAT" in results.values() and "UNSAT" in results.values():
+            print(f"WARNING: found inconsistent results:\n {results}\nfor file {cnf_path}")
+            quit()
 
     fieldnames = list(rows[0].keys()) if rows else []
     with open(out_csv, "w", newline="") as f:
@@ -87,6 +97,7 @@ if __name__ == "__main__":
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no-baseline", action="store_true")
     ap.add_argument("--no-vsids", action="store_true")
+    ap.add_argument("--check-results", action="store_true")
     args = ap.parse_args()
 
     cnfs = find_cnf_files(args.path)
@@ -97,4 +108,5 @@ if __name__ == "__main__":
         seed=args.seed,
         run_baseline=not args.no_baseline,
         run_vsids=not args.no_vsids,
+        check_results=args.check_results
     )

@@ -30,11 +30,11 @@ class BoolLiteral:
     def __hash__(self):
         return hash((self.variable, self.polarity))
 
-    def is_pos(self, variable: str) -> bool:
-        return self.variable == variable and self.polarity is True
+    def is_pos(self) -> bool:
+        return self.polarity
 
-    def is_neg(self, variable: str) -> bool:
-        return self.variable == variable and self.polarity is False
+    def is_neg(self) -> bool:
+        return not self.polarity
 
     @staticmethod
     def make_pos(variable: str):
@@ -70,6 +70,15 @@ class Clause:
         # Needed so Clause can be compared and stored in sets
         return hash(frozenset(self.literals))
 
+    def eval(self, assignment: Dict[str, bool]) -> bool:
+        """Returns true if the given variable assignment satisfies the clause, and false otherwise."""
+        for literal in self.literals:
+            if literal.variable in assignment:
+                lit_value = assignment[literal.variable]
+                if lit_value and literal.is_pos() or not lit_value and literal.is_neg():
+                    return True
+        return False
+
     @staticmethod
     def make(*lit_strings: str) -> "Clause":
         """Convenience for small tests: Clause.make("1","-2","3")"""
@@ -80,6 +89,14 @@ class Clause:
             else:
                 literals.append(BoolLiteral.make_pos(lit_string))
         return Clause(*literals)
+
+    @staticmethod
+    def check(cnf: List[Clause], assignment: Dict[str, bool]) -> bool:
+        """Returns false if the given variable assignment fails to satisfy a set of clauses, and true otherwise."""
+        for clause in cnf:
+            if not clause.eval(assignment):
+                return False
+        return True
 
 class ImplicationGraph:
     """Implication graph used during conflict analysis.
@@ -137,22 +154,30 @@ class Model:
         self.decision_level: int = 0
         # decisions stores the assignment index where each decision level starts
         self.decisions: List[int] = []
-        self.decision_levels: Dict[BoolLiteral, int] = {}
+        self.decision_levels: Dict[str, int] = {}
+        self.trail: Dict[str, int] = {}
 
     def __contains__(self, literal: BoolLiteral) -> bool:
         return literal in self.assignment
 
     def assign(self, literal: BoolLiteral) -> None:
         # assign = forced (propagation)
+        self.trail[literal.variable] = len(self.assignment)
         self.assignment.append(literal)
-        self.decision_levels[literal] = self.decision_level
+        self.decision_levels[literal.variable] = self.decision_level
+
+    def assigned(self, variable: str):
+        """
+        Returns True if the variable for the given literal is already assigned by 
+        the model.
+        """
+        return BoolLiteral.make_pos(variable) in self.assignment or BoolLiteral.make_neg(variable) in self.assignment
 
     def decide(self, literal: BoolLiteral) -> None:
         # decide = guess at a new decision level
-        self.decisions.append(len(self.assignment))
-        self.assignment.append(literal)
         self.decision_level += 1
-        self.decision_levels[literal] = self.decision_level
+        self.decisions.append(len(self.assignment))
+        self.assign(literal)
 
     def backjump(self, decision_level: int) -> None:
         idx = self.decisions[decision_level]
@@ -164,7 +189,7 @@ class Model:
 
         # Remove stale decision level mappings
         for lit in removed:
-            self.decision_levels.pop(lit, None)
+            self.decision_levels.pop(lit.variable, None)
 
     def get_current_decision_literals(self) -> List[BoolLiteral]:
         if not self.decisions:
@@ -179,11 +204,13 @@ class Model:
         """IMPORTANT: learned clauses can contain ¬x even if the model stores x.
 
         So if literal isn't found, we also try its negation.
+
+        NOTE: we preserve the invariant that x and ¬x cannot both be contained in the 
+        current model, so the decision level need only track variable *name*, not the 
+        literal.
         """
-        lvl = self.decision_levels.get(literal, None)
-        if lvl is not None:
-            return lvl
-        return self.decision_levels.get(literal.negate(), -1)
+        lvl = self.decision_levels.get(literal.variable, None)
+        return lvl
 
     def __repr__(self) -> str:
         if self.decision_level == 0:
@@ -220,10 +247,10 @@ class State:
             return "SAT"
         
         out = []
-        out.append("Δ = " + repr(self.clauses))
+        #out.append("Δ = " + repr(self.clauses)) # TODO
         out.append("M = " + repr(self.model))
         out.append("C = " + (repr(self.conflict) if self.conflict else "no"))
-        return "\n".join(out) + "\n"
+        return "\n".join(out)
 
 
 class Core:
@@ -286,13 +313,38 @@ class Core:
             return True
         return False
 
+    # TODO -- this is wrong
+    #def explain(self) -> bool:
+    #    """Explain conflict until only 1 literal remains at current decision level."""
+    #    decision_literals = self.state.model.get_current_decision_literals()
+    #    while len(decision_literals) > 1:
+    #        last_literal = self.state.model.assignment.pop(-1) # TODO -- problem here?
+    #        print(self.graph.conflict_clause)
+    #        self.graph.explain(last_literal)
+    #        decision_literals = decision_literals[:-1]
+    #    self.state.conflict = Clause(*self.graph.conflict_clause)
+    #    return True
+
+    def num_at_current_level(self, clause: Clause):
+        return sum(1 for literal in clause if self.state.model.decision_levels.get(literal.variable) == self.state.model.decision_level) # use model.get_level here!
+
     def explain(self) -> bool:
         """Explain conflict until only 1 literal remains at current decision level."""
-        decision_literals = self.state.model.get_current_decision_literals()
-        while len(decision_literals) > 1:
-            last_literal = self.state.model.assignment.pop(-1)
+        if not self.in_conflict:
+            return False
+        decision_literals = self.graph.conflict_clause
+        # TODO -- make num_at_current_level faster to compute; store levels in graph or whatever
+        while self.num_at_current_level(decision_literals) > 1:
+            #last_literal = self.state.model.assignment.pop(-1)
+            # TODO -- find this faster
+            candidates = [literal for literal in decision_literals if self.state.model.decision_levels.get(literal.variable) == self.state.model.decision_level]
+            last_literal = max(candidates, key=lambda lit: self.state.model.trail[lit.variable]).negate()# TODO -- this should be the most recently assigned literal in the model's assignment among those in the conflict clause
+            
+            #print("!!!!", candidates, last_literal, self.num_at_current_level(decision_literals))
+            #self.state.model.trail.pop(last_literal.variable) # TODO
             self.graph.explain(last_literal)
-            decision_literals = decision_literals[:-1]
+            decision_literals = self.graph.conflict_clause
+        self.state.conflict = Clause(*self.graph.conflict_clause)
         return True
 
     def backjump(self, decision_level: int) -> bool:
@@ -301,8 +353,10 @@ class Core:
             return False
 
         conflict_clause = self.graph.conflict_clause
-        decision_literal = self.state.model.get_last_literal()
-        uip_neg = decision_literal.negate()
+        #decision_literal = self.state.model.get_last_literal()
+        #uip_neg = decision_literal.negate()
+        # TODO
+        uip_neg = [literal for literal in self.graph.conflict_clause if self.state.model.get_level(literal) == self.state.model.decision_level][0]
 
         # IMPORTANT: conflict_clause contains uip_neg (not decision_literal)
         level = -1
@@ -314,11 +368,18 @@ class Core:
             self.state.model.backjump(decision_level)
 
             # Assert the negation of the remaining literal.
-            self.state.model.assign(decision_literal.negate())
+            self.state.model.assign(uip_neg)
 
             self.state.conflict = None
             self.graphs = self.graphs[: decision_level + 1]
             self.graph = self.graphs[-1]
+
+            # TODO -- explain the assignment from backjump?
+            self.graph.add_node(uip_neg)
+            for literal in conflict_clause - {uip_neg}:
+                self.graph.add_edge(literal.negate(), uip_neg)
+            # END TODO
+
             return True
         return False
 
@@ -331,17 +392,15 @@ class Core:
 
     def learn(self) -> Optional[Clause]:
         """Add the current conflict clause to the clause database (if new)."""
-        if self.graph.conflict_clause is None:
+        if self.state.conflict is None:
             return None
 
-        learned = Clause(*self.graph.conflict_clause)
+        learned = self.state.conflict
         if learned not in self.state.clauses:
             self.state.clauses.append(learned)
         return learned
 
-    # TODO: store a map T[n] = {clause indices} such that if C = clause[k], k in T[n], then C has n literals x s.t. x, ~x are both unassigned
-
     def __repr__(self) -> str:
-        core_string = 'State:\n' + repr(self.state)
-        core_string += 'Implication Graph:\n' + repr(self.graph)
+        core_string = 'State:\n' + repr(self.state) + '\n'
+        core_string += 'Implication Graph:\n' + repr(self.graph) #TODO
         return core_string

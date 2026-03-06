@@ -29,11 +29,12 @@ class RandomBaselineHeuristic:
         self.rng = random.Random(seed)
 
     def pick_decision(self, model: Model) -> Optional[BoolLiteral]:
-        unassigned_vars = [
-            v
-            for v in self.variables
-            if BoolLiteral.make_pos(v) not in model and BoolLiteral.make_neg(v) not in model
-        ]
+        #unassigned_vars = [
+        #    v
+        #    for v in self.variables
+        #    if BoolLiteral.make_pos(v) not in model and BoolLiteral.make_neg(v) not in model
+        #]
+        unassigned_vars = [v for v in self.variables if not model.assigned(v)]
         if not unassigned_vars:
             return None
 
@@ -41,7 +42,7 @@ class RandomBaselineHeuristic:
         polarity = self.rng.choice([True, False])  # True means v, False means ¬v
         return BoolLiteral(v, polarity)
 
-    def on_learned_clause(self, clause: Clause) -> None:
+    def on_learned_clause(self, clause: Clause, model: Model) -> None:
         return
 
     def on_conflict(self) -> None:
@@ -93,9 +94,10 @@ class VSIDSHeuristic:
             return None
         return self.rng.choice(candidates)
 
-    def on_learned_clause(self, clause: Clause) -> None:
+    def on_learned_clause(self, clause: Clause, model: Model) -> None:
         for lit in clause:
-            self.activity[lit] = self.activity.get(lit, 0.0) + self.bump
+            if not model.assigned(lit.variable):
+                self.activity[lit] = self.activity.get(lit, 0.0) + self.bump
 
     def on_conflict(self) -> None:
         self.conflict_count += 1
