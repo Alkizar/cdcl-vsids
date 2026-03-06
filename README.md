@@ -4,7 +4,7 @@
 **Project:** Option 1 – SAT decision procedure (CDCL + VSIDS)
 
 **Team**
-- Yash — (Stanford email)
+- Yash — (yashm@stanford.edu)
 - Bryce — (Stanford email)
 - Oscar — (Stanford email)
 
