@@ -74,8 +74,7 @@ def run_benchmarks(
 
         # Emit warning if mismatched outputs are detected across heuristics
         if check_results and "SAT" in results.values() and "UNSAT" in results.values():
-            print(f"WARNING: found inconsistent results:\n {results}\nfor file {cnf_path}")
-            quit()
+            raise ValueError(f"WARNING: found inconsistent results:\n {results}\nfor file {cnf_path}")
 
     fieldnames = list(rows[0].keys()) if rows else []
     with open(out_csv, "w", newline="") as f:

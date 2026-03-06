@@ -59,20 +59,13 @@ def _unit_propagate_all(core: Core, stats: SolveStats) -> None:
                 changed = True
 
 
-def _compute_backjump_level(core: Core) -> int: # TODO bug here?
+def _compute_backjump_level(core: Core) -> int:
     assert core.graph.conflict_clause is not None
 
-    #decision_lit = core.state.model.get_last_literal() # TODO
-    #uip_neg = decision_lit.negate() # TODO
-
-    # TODO: can we store this somewhere to avoid recomputing?
-    uip_neg = [literal for literal in core.graph.conflict_clause if core.state.model.get_level(literal) == core.state.model.decision_level][0]
-
+    uip_neg = core.get_uip()
     others = core.graph.conflict_clause - {uip_neg}
-    #print("_compute_backjump_level:", others, core.graph.conflict_clause, uip_neg)
+
     if not others:
-        # TODO: check that this is okay
-        #return core.state.model.get_level(uip_neg) - 1
         return 0
     return max(core.state.model.get_level(l) for l in others)
     
@@ -108,15 +101,11 @@ def solve_cnf(
 
     while True:
 
-        #print("START", core)
-
         if timed_out():
             return SolveResult("TIMEOUT", time.perf_counter() - start, stats, _assignment_dict(state))
 
         # 1) Propagate
         _unit_propagate_all(core, stats)
-
-        #print("PROPAGATE", core)
 
         # 2) Conflict?
         if core.in_conflict:
@@ -125,22 +114,15 @@ def solve_cnf(
 
             core.explain()
 
-            #print("EXPLAIN", core)
-
-            # TODO -- there is a problem in learn!
-            #learned = core.learn()
-            #print("LEARNED: ", learned)
-            #if learned is not None:
-            #    stats.learned_clauses += 1
-            #    heuristic.on_learned_clause(learned, core.state.model)
+            learned = core.learn()
+            if learned is not None:
+                stats.learned_clauses += 1
+                heuristic.on_learned_clause(learned, core.state.model)
 
             heuristic.on_conflict()
 
             bj = _compute_backjump_level(core)
-            #print("!!", bj, " -- ", core.state.model.decisions)
             core.backjump(bj)
-
-            #print("BACKJUMP", core)
 
             if debug:
                 print("--- conflict handled, backjump to", bj)

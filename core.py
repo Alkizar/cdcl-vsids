@@ -212,6 +212,23 @@ class Model:
         lvl = self.decision_levels.get(literal.variable, None)
         return lvl
 
+    def at_current_level(self, clause: iter(BoolLiteral)) -> List[BoolLiteral]:
+        """Returns all the literals in the provided clause that are in the current decision level."""
+        return [literal for literal in clause if self.decision_levels.get(literal.variable) == self.decision_level]
+
+    def count_at_current_level(self, clause: iter(BoolLiteral)) -> int:
+        """Returns the number of literals in the provided clause that are at the current decision level."""
+        return sum(1 for literal in clause if self.decision_levels.get(literal.variable) == self.decision_level)
+
+    def get_most_recent(self, clause: iter(BoolLiteral)) -> BoolLiteral:
+        """
+        Returns the most recently assigned literal in the provided clause.
+        
+        NOTE: clause must intersect the trail nontrivially; will error otherwise.
+        TODO: -- check that this invariant holds.
+        """
+        return max(clause, key=lambda lit: self.trail[lit.variable])
+
     def __repr__(self) -> str:
         if self.decision_level == 0:
             return " ".join(repr(l) for l in self.assignment)
@@ -247,7 +264,7 @@ class State:
             return "SAT"
         
         out = []
-        #out.append("Δ = " + repr(self.clauses)) # TODO
+        out.append("Δ = " + repr(self.clauses))
         out.append("M = " + repr(self.model))
         out.append("C = " + (repr(self.conflict) if self.conflict else "no"))
         return "\n".join(out)
@@ -262,6 +279,15 @@ class Core:
         self.graph: ImplicationGraph = self.graphs[-1]
         self.in_conflict: bool = False
         self.state = state
+
+    def get_uip(self) -> BoolLiteral:
+        """
+        Returns the UIP following a call to explain().
+
+        NOTE: this must be used after explain(), and before backjump() resolves the conflict.
+        TODO: check that this invariant holds.
+        """
+        return self.state.model.at_current_level(self.graph.conflict_clause)[0]
 
     def propagate(self, clause_idx: int) -> bool:
         """Unit propagation using clause_idx.
@@ -313,35 +339,14 @@ class Core:
             return True
         return False
 
-    # TODO -- this is wrong
-    #def explain(self) -> bool:
-    #    """Explain conflict until only 1 literal remains at current decision level."""
-    #    decision_literals = self.state.model.get_current_decision_literals()
-    #    while len(decision_literals) > 1:
-    #        last_literal = self.state.model.assignment.pop(-1) # TODO -- problem here?
-    #        print(self.graph.conflict_clause)
-    #        self.graph.explain(last_literal)
-    #        decision_literals = decision_literals[:-1]
-    #    self.state.conflict = Clause(*self.graph.conflict_clause)
-    #    return True
-
-    def num_at_current_level(self, clause: Clause):
-        return sum(1 for literal in clause if self.state.model.decision_levels.get(literal.variable) == self.state.model.decision_level) # use model.get_level here!
-
     def explain(self) -> bool:
         """Explain conflict until only 1 literal remains at current decision level."""
         if not self.in_conflict:
             return False
         decision_literals = self.graph.conflict_clause
-        # TODO -- make num_at_current_level faster to compute; store levels in graph or whatever
-        while self.num_at_current_level(decision_literals) > 1:
-            #last_literal = self.state.model.assignment.pop(-1)
-            # TODO -- find this faster
-            candidates = [literal for literal in decision_literals if self.state.model.decision_levels.get(literal.variable) == self.state.model.decision_level]
-            last_literal = max(candidates, key=lambda lit: self.state.model.trail[lit.variable]).negate()# TODO -- this should be the most recently assigned literal in the model's assignment among those in the conflict clause
-            
-            #print("!!!!", candidates, last_literal, self.num_at_current_level(decision_literals))
-            #self.state.model.trail.pop(last_literal.variable) # TODO
+        while self.state.model.count_at_current_level(decision_literals) > 1:
+            candidates = self.state.model.at_current_level(decision_literals)
+            last_literal = self.state.model.get_most_recent(candidates).negate()
             self.graph.explain(last_literal)
             decision_literals = self.graph.conflict_clause
         self.state.conflict = Clause(*self.graph.conflict_clause)
@@ -353,10 +358,7 @@ class Core:
             return False
 
         conflict_clause = self.graph.conflict_clause
-        #decision_literal = self.state.model.get_last_literal()
-        #uip_neg = decision_literal.negate()
-        # TODO
-        uip_neg = [literal for literal in self.graph.conflict_clause if self.state.model.get_level(literal) == self.state.model.decision_level][0]
+        uip_neg = self.get_uip()
 
         # IMPORTANT: conflict_clause contains uip_neg (not decision_literal)
         level = -1
@@ -374,11 +376,11 @@ class Core:
             self.graphs = self.graphs[: decision_level + 1]
             self.graph = self.graphs[-1]
 
-            # TODO -- explain the assignment from backjump?
+            # Insert the learned explanation for new assignment into the implication
+            # graph.
             self.graph.add_node(uip_neg)
             for literal in conflict_clause - {uip_neg}:
                 self.graph.add_edge(literal.negate(), uip_neg)
-            # END TODO
 
             return True
         return False
@@ -402,5 +404,5 @@ class Core:
 
     def __repr__(self) -> str:
         core_string = 'State:\n' + repr(self.state) + '\n'
-        core_string += 'Implication Graph:\n' + repr(self.graph) #TODO
+        core_string += 'Implication Graph:\n' + repr(self.graph)
         return core_string
