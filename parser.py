@@ -28,6 +28,9 @@ def parse_dimacs(path: str) -> List[Clause]:
                     expected_clauses = int(parts[3])
                 continue
 
+            if line.startswith("%"):
+                break
+
             for tok in line.split():
                 if tok == "0":
                     # End of this clause
