@@ -1,12 +1,12 @@
 
 def init_results():
     return {
-        "number_timeouts": 0,
-        "mean_runtime": 0,
-        "mean_decisions": 0,
-        "mean_conflicts": 0,
-        "mean_learned_clauses": 0,
-        "mean_propagations": 0,
+        "number_timeouts"       : 0,
+        "mean_runtime"          : 0,
+        "mean_decisions"        : 0,
+        "mean_conflicts"        : 0,
+        "mean_learned_clauses"  : 0,
+        "mean_propagations"     : 0,
     }
 
 if __name__ == "__main__":
@@ -28,15 +28,15 @@ if __name__ == "__main__":
 
             line = raw_line.strip().split(",")
 
-            file_name = line[0]
-            file_path = line[1]
-            heuristic = line[2]
-            status = line[3]
-            runtime = line[4]
-            decisions = line[5]
-            conflicts = line[6]
+            file_name       = line[0]
+            file_path       = line[1]
+            heuristic       = line[2]
+            status          = line[3]
+            runtime         = line[4]
+            decisions       = line[5]
+            conflicts       = line[6]
             learned_clauses = line[7]
-            propagations = line[8]
+            propagations    = line[8]
 
             if status == "TIMEOUT":
                 results[heuristic]["number_timeouts"] += 1
