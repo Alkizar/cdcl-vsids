@@ -5,8 +5,8 @@
 
 **Team**
 - Yash — (yashm@stanford.edu)
-- Bryce — (Stanford email)
-- Oscar — (Stanford email)
+- Bryce — (brycegoldman@stanford.edu)
+- Oscar — (omier@stanford.edu)
 
 ---
 

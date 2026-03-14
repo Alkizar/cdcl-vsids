@@ -21,7 +21,7 @@ if __name__ == "__main__":
     max_runtime_diff_vsids = 0.0
     max_runtime_diff_baseline = 0.0
 
-    with open("results-aim.csv", "r") as f:
+    with open("results/results-uuf75.csv", "r") as f:
         for raw_line in f:
             num_tests += 1
 
@@ -59,6 +59,7 @@ if __name__ == "__main__":
     print(f"Number of CNF formulas in benchmark: {num_tests}")
     print(f"Maximum runtime difference (VSIDS - baseline): {max_runtime_diff_vsids}")
     print(f"Maximum runtime difference (baseline - VSIDS): {max_runtime_diff_baseline}")
+    print(f"Speedup from VSIDS: {results["baseline"]["mean_runtime"] / results["vsids"]["mean_runtime"]}")
 
     for heuristic in results.keys():
         results[heuristic]["mean_runtime"]          /= num_tests
